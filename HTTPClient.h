@@ -25,7 +25,8 @@ namespace HTTPClient{
     class BasicHTTPClient
     {
     public:
-        BasicHTTPClient(std::string method, std::string URL, std::string content_type = "text/html", const std::initializer_list<std::pair<std::string, std::string>>& headerFields = {});
+        BasicHTTPClient(const std::string& method, const std::string& URL, const std::string& contentType = "text/html", const std::initializer_list<std::pair<std::string, std::string>>& headerFields = {});
+        BasicHTTPClient(const std::string& method, const std::string& URL, const std::string& contentType, const std::initializer_list<std::pair<std::string, std::string>>& headerFields, size_t contentLength);
 
         int responseCode();
         HeaderFields header();
@@ -45,17 +46,26 @@ namespace HTTPClient{
         bool                                responseHeaderReceived;
         int                                 responseCode_;
         HeaderFields                        header_;
+        bool                                chunkedSend_;
 
         std::tuple<bool, std::string, std::uint16_t, std::string> splitAddressPortURI(const std::string& URL);
+        void sendHeader(const std::string& method, const std::string& URI, const std::string& host, const std::string& contentType, const std::initializer_list<std::pair<std::string, std::string>>& headerFields);
+        void sendHeader(const std::string& method, const std::string& URI, const std::string& host, const std::string& contentType, const std::initializer_list<std::pair<std::string, std::string>>& headerFields, size_t contentLength);
+        void ParseResponse();
+        void ParseResponseHeader(const std::string& header);
+
+
+        void chunkedSend(const char* buffer, size_t length);
+        void normalSend(const char* buffer, size_t length);
+
         size_t chunkedRecv(char* buffer, size_t length);
         size_t normalRecv(char* buffer, size_t length);
         size_t recvRemainingBuffer(char* buffer, size_t length, size_t recvedLen);
         size_t recvRemainingChunk(char* buffer, size_t length, size_t recvedLen);
         void completeCurrentChunk();
         void prepareForNextChunk();
-        void sendHeader(const std::string& method, const std::string& URI, const std::string& host, const std::initializer_list<std::pair<std::string, std::string>>& headerFields);
-        void ParseResponse();
-        void ParseResponseHeader(const std::string& header);
     };
+    std::tuple<int, std::string> HTTPGet(const std::string& URL, const std::string& content_type = "text/html", const std::initializer_list<std::pair<std::string, std::string>>& headerFields = {});
+    std::tuple<int, std::string> HTTPPost(const std::string& URL, const std::string& content_type = "text/html", const std::initializer_list<std::pair<std::string, std::string>>& headerFields = {}, const std::string& body = "");
 }
 #endif

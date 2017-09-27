@@ -1,1 +1,3 @@
-HTTPClient
+# HTTPClient
+Small C++ HTTPClient
+mbedTLS

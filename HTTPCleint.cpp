@@ -25,17 +25,34 @@ namespace HTTPClient
         return what_;
     }
 
-    BasicHTTPClient::BasicHTTPClient(string method, string URL, string content_type, const initializer_list<pair<string, string>>& headerFields):
-        remainingChunkLen(0), contentReceived(0), recvComplete(false), chunkedTransfer_(false), contentLength_(0), responseHeaderReceived(false)
+    BasicHTTPClient::BasicHTTPClient(const string& method, const string& URL, const string& contentType, const initializer_list<pair<string, string>>& headerFields):
+        remainingChunkLen(0), contentReceived(0), recvComplete(false), chunkedTransfer_(false), contentLength_(0), responseHeaderReceived(false), chunkedSend_(true)
     {
         string host, URN;
         uint16_t port;
         bool HTTPS;
         tie (HTTPS, host, port, URN) = splitAddressPortURI(URL);
         TCP = make_shared<TCPClient>(host, port, HTTPS);
-        sendHeader(method, URN, host, headerFields);
+        sendHeader(method, URN, host, contentType, headerFields);
     }
 
+    BasicHTTPClient::BasicHTTPClient(const string& method, const string& URL, const string& contentType, const initializer_list<pair<string, string>>& headerFields, size_t contentLength):
+        remainingChunkLen(0), contentReceived(0), recvComplete(false), chunkedTransfer_(false), contentLength_(0), responseHeaderReceived(false), chunkedSend_(false)
+    {
+        string host, URN;
+        uint16_t port;
+        bool HTTPS;
+        tie (HTTPS, host, port, URN) = splitAddressPortURI(URL);
+        TCP = make_shared<TCPClient>(host, port, HTTPS);
+        sendHeader(method, URN, host, contentType, headerFields, contentLength);
+    }
+
+    int BasicHTTPClient::responseCode()
+    {
+        if (!responseHeaderReceived)
+            ParseResponse();
+        return responseCode_;
+    }
     tuple<bool, string, uint16_t, string> BasicHTTPClient::splitAddressPortURI(const string& URL)
     {
         string protocole = URL.substr(0, 8);
@@ -71,21 +88,34 @@ namespace HTTPClient
         return make_tuple(HTTPS_, host, port, URN);
     }
 
-    void BasicHTTPClient::sendHeader(const string& method, const string& URN, const string& host, const initializer_list<pair<string, string>>& headerFields)
+    void BasicHTTPClient::sendHeader(const string& method, const string& URI, const string& host, const string& contentType, const initializer_list<pair<string, string>>& headerFields)
     {
         stringstream response;
-        response << method << " " << URN << " " << "HTTP/1.1" << "\r\n"
+        response << method << " " << URI << " " << "HTTP/1.1" << "\r\n"
                  << "host: " << host << "\r\n";
         for (auto& headerField : headerFields)
             response << headerField.first << ":" << headerField.second << "\r\n";
-        response << "Connection: close\r\n"
-                 << "Transfer-Encoding: chunked\r\n"
-                 //<< "content-length:0" << "\r\n"
-                 << "\r\n";
+            response << "Connection: close\r\n"
+                     << "Transfer-Encoding: chunked\r\n"
+                     << "\r\n";
         TCP->Send(response.str().c_str(), response.str().length());
     }
 
-    void BasicHTTPClient::send(const char* buffer, size_t length)
+    void BasicHTTPClient::sendHeader(const string& method, const string& URI, const string& host, const string& contentType, const initializer_list<pair<string, string>>& headerFields, size_t contentLength)
+    {
+        stringstream response;
+        response << method << " " << URI << " " << "HTTP/1.1" << "\r\n"
+                 << "host: " << host << "\r\n"
+                 << "content-type: " << contentType << "\r\n";
+        for (auto& headerField : headerFields)
+            response << headerField.first << ":" << headerField.second << "\r\n";
+            response << "Connection: close\r\n"
+                     << "content-length:" << contentLength << "\r\n"
+                     << "\r\n";
+        TCP->Send(response.str().c_str(), response.str().length());
+    }
+
+    void BasicHTTPClient::chunkedSend(const char* buffer, size_t length)
     {
         char sendBuffer[100];
         size_t remainedLength = length;
@@ -112,6 +142,19 @@ namespace HTTPClient
                 remainedLength = 0;
             }
         }
+    }
+
+    void BasicHTTPClient::normalSend(const char* buffer, size_t length)
+    {
+        TCP->Send(buffer, length);
+    }
+
+    void BasicHTTPClient::send(const char* buffer, size_t length)
+    {
+        if (chunkedSend_)
+            chunkedSend(buffer, length);
+        else
+            normalSend(buffer, length);
     }
 
     size_t BasicHTTPClient::recv(char* buffer, size_t length)
@@ -143,8 +186,8 @@ namespace HTTPClient
                 else
                 {
                     recvedLen = recvRemainingChunk(buffer, length, recvedLen);
-                    if (remainingChunkLen > 0 && length != recvedLen)
-                        throw HTTPClientException();
+//                    if (remainingChunkLen > 0 && length != recvedLen)
+//                        throw HTTPClientException();
                 }
                 if (remainingChunkLen == 0)
                     completeCurrentChunk();
@@ -201,8 +244,8 @@ namespace HTTPClient
         int recvLen = 0;
         size_t readLen = min((length - recvedLen), remainingChunkLen);
         recvLen = TCP->Recv(buffer + recvedLen, readLen);
-        if (recvLen != readLen)
-            throw HTTPClientException("Bad HTTP chunk3");
+//        if (recvLen != readLen)
+//            throw HTTPClientException("Bad HTTP chunk3");
         remainingChunkLen -= recvLen;
         recvedLen += recvLen;
         return recvedLen;
@@ -271,7 +314,8 @@ namespace HTTPClient
 
     void BasicHTTPClient::finishRequest()
     {
-        TCP->Send("0\r\n\r\n", 5);
+        if (chunkedSend_)
+            TCP->Send("0\r\n\r\n", 5);
     }
 
     void BasicHTTPClient::ParseResponse()
@@ -337,5 +381,36 @@ namespace HTTPClient
                 contentLength_ = atoi(value.c_str());
         }
         responseHeaderReceived = true;
+    }
+
+    tuple<int, string> HTTPGet(const string& URL, const string& content_type, const initializer_list<pair<string, string>>& headerFields)
+    {
+        BasicHTTPClient HTTPClient("GET", URL, content_type, headerFields, 0);
+        HTTPClient.finishRequest();
+        string responseBody;
+        while (!HTTPClient.isRecvCompleted())
+        {
+            char buffer[51];
+            int recvLen = HTTPClient.recv(buffer, 50);
+            buffer[recvLen] = 0;
+            responseBody += buffer;
+        }
+        return make_tuple(HTTPClient.responseCode(), responseBody);
+    }
+
+    tuple<int, string> HTTPPost(const string& URL, const string& content_type, const initializer_list<pair<string, string>>& headerFields, const string& body)
+    {
+        BasicHTTPClient HTTPClient("POST", URL, content_type, headerFields);
+        HTTPClient.send(body.c_str(), body.length());
+        HTTPClient.finishRequest();
+        string responseBody;
+        while (!HTTPClient.isRecvCompleted())
+        {
+            char buffer[51];
+            int recvLen = HTTPClient.recv(buffer, 50);
+            buffer[recvLen] = 0;
+            responseBody += buffer;
+        }
+        return make_tuple(HTTPClient.responseCode(), responseBody);
     }
 }
