@@ -92,7 +92,8 @@ namespace HTTPClient
     {
         stringstream response;
         response << method << " " << URI << " " << "HTTP/1.1" << "\r\n"
-                 << "host: " << host << "\r\n";
+                 << "host: " << host << "\r\n"
+                 << "Content-type: " << contentType << "\r\n";
         for (auto& headerField : headerFields)
             response << headerField.first << ":" << headerField.second << "\r\n";
             response << "Connection: close\r\n"
