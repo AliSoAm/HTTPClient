@@ -1,13 +1,11 @@
 #include "TCPClient.h"
-#include "FreeRTOS.h"
-#include "task.h"
 #include <stdexcept>
 #include <cstring>
 #include <iostream>
 #include <sys/socket.h>
 #include <iostream>
 #include <netdb.h>
-
+ #include <unistd.h>
 using namespace std;
 #ifdef SECURE_TCP
 const char certificate[] =
@@ -133,7 +131,7 @@ int TCPClient::normalRecv(char* buffer, size_t length)
 
 size_t TCPClient::Recv(char* buffer, size_t length)
 {
-  
+
   if (!isOpen())
     throw TCPClientException("Receiving from closed connection");
   if (length < 1)
@@ -196,7 +194,7 @@ void TCPClient::createNormalSocket(const string& address, uint16_t port)
   int rc, err = ERANGE;
   struct hostent hbuf;
   struct hostent *server;
-  size_t len = 512; 
+  size_t len = 512;
   void* tmp = NULL;
   do
   {
@@ -226,10 +224,10 @@ void TCPClient::createNormalSocket(const string& address, uint16_t port)
     throw TCPClientException("ERROR opening socket");
   open = true;
   int timeout = 5 * 1000;
-  if (setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout)) < 0)
-    throw TCPClientException("ERROR setsockopt SO_RCVTIMEO");
-  if (setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout)) < 0)
-    throw TCPClientException("ERROR setsockopt SO_SNDTIMEO");
+  //if (setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout)) < 0)
+    //throw TCPClientException("ERROR setsockopt SO_RCVTIMEO");
+  //if (setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout)) < 0)
+    //throw TCPClientException("ERROR setsockopt SO_SNDTIMEO");
   if (connect(socketFD, (const sockaddr*)&serveraddr, sizeof(serveraddr)) < 0)
     throw TCPClientException("ERROR connecting");
 }
