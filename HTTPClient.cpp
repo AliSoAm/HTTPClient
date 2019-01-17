@@ -1,6 +1,7 @@
 #include "HTTPClient.h"
 #include <tuple>
 #include <cstring>
+#include <array>
 #include <algorithm>
 #include <sstream>
 #include "md5.h"
@@ -10,7 +11,6 @@ namespace HTTPClient
 {
   HTTPClientException::HTTPClientException() noexcept
   {
-
     strcpy(what_, "HTTP client exception");
   }
 
@@ -173,7 +173,7 @@ namespace HTTPClient
     TCP->Send(buffer, length);
   }
 
-  void BasicHTTPClient::send(const char* buffer, size_t length) //TODO allow before request finish only
+  void BasicHTTPClient::put(const char* buffer, size_t length) //TODO allow before request finish only
   {
     if (chunkedSend_)
       chunkedSend(buffer, length);
@@ -181,7 +181,7 @@ namespace HTTPClient
       normalSend(buffer, length);
   }
 
-  size_t BasicHTTPClient::recv(char* buffer, size_t length)//TODO allow after request finish only
+  size_t BasicHTTPClient::get(char* buffer, size_t length)//TODO allow after request finish only
   {
     if (!responseHeaderReceived)
       ParseResponse();
@@ -422,7 +422,7 @@ namespace HTTPClient
     while (!client.isRecvCompleted())
     {
       char buffer[51];
-      int recvLen = client.recv(buffer, 50);
+      int recvLen = client.get(buffer, 50);
       buffer[recvLen] = 0;
       responseBody += buffer;
     }
@@ -433,13 +433,13 @@ namespace HTTPClient
     , const initializer_list<pair<string, string>>& headerFields, const string& body)
   {
     BasicHTTPClient client("POST", URL, content_type, headerFields);
-    client.send(body.c_str(), body.length());
+    client.put(body.c_str(), body.length());
     client.finishRequest();
     string responseBody;
     while (!client.isRecvCompleted())
     {
       char buffer[51];
-      int recvLen = client.recv(buffer, 50);
+      int recvLen = client.get(buffer, 50);
       buffer[recvLen] = 0;
       responseBody += buffer;
     }
@@ -482,7 +482,6 @@ namespace HTTPClient
     string HA2;
     char* qop = "auth";
     char nonceCountStr[9];
-    snprintf(nonceCountStr, 9, "%08i", nonceCount % 100000000);
     if (authenticateFields["qop"].empty() || authenticateFields["qop"].find("auth") != string::npos)
       HA2 = md5(method + ":" + digestURI);
     else if (authenticateFields["qop"].find("auth-int") != string::npos)
@@ -510,12 +509,12 @@ namespace HTTPClient
     client.finishRequest();
     array<char, 50> buffer;
     while (!client.isRecvCompleted())
-      int recvLen = client.recv(buffer.data(), 50);
+      int recvLen = client.get(buffer.data(), 50);
     if (client.responseCode() == 401 && client.header().count("www-authenticate") > 0)
     {
       vector<pair<string, string>> newHeaderFields(headerFields);
       string authenticate = client.header().at("www-authenticate");
-      if (authenticate.compare(0, 5, "basic") == 0)
+      if (authenticate.compare(0, 5, "Basic") == 0)
       {
         newHeaderFields.push_back(make_pair("Authorization", "Basic " + md5(username + ":" + password)));
         return make_shared<BasicHTTPClient>(method, URL, content_type, newHeaderFields, contentLength);

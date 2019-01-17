@@ -1,11 +1,8 @@
 #include "TCPClient.h"
 #include <stdexcept>
 #include <cstring>
-#include <iostream>
 #include <sys/socket.h>
-#include <iostream>
 #include <netdb.h>
- #include <unistd.h>
 using namespace std;
 #ifdef SECURE_TCP
 const char certificate[] =
@@ -223,7 +220,7 @@ void TCPClient::createNormalSocket(const string& address, uint16_t port)
   if (socketFD < 0)
     throw TCPClientException("ERROR opening socket");
   open = true;
-  int timeout = 5 * 1000;
+  int timeout = 50 * 1000;
   if (setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout)) < 0)
     throw TCPClientException("ERROR setsockopt SO_RCVTIMEO");
   if (setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout)) < 0)

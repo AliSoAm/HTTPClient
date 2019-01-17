@@ -35,9 +35,9 @@ namespace HTTPClient{
     int responseCode();
     HeaderFields header();
     void finishRequest();
-    void send(const char* buffer, size_t length);
+    void put(const char* buffer, size_t length);
     bool isRecvCompleted() const;
-    size_t recv(char* buffer, size_t length);
+    size_t get(char* buffer, size_t length);
   private:
     std::shared_ptr<TCPClient>          TCP;
     char                                remainingBuffer[150];
@@ -74,7 +74,7 @@ namespace HTTPClient{
   std::tuple<int, std::string> HTTPPost(const std::string& URL, const std::string& content_type = "text/html", const std::initializer_list<std::pair<std::string, std::string>>& headerFields = {}, const std::string& body = "");
 
   // TODO add function without content length
-  std::shared_ptr<BasicHTTPClient> HTTPClient(const std::string& method, const std::string& username, const std::string& password, const std::string& URL, const std::string& content_type = "text/html", const std::initializer_list<std::pair<std::string, std::string>>& headerFields = {}, const std::string& cnonce = "abcdefg", unsigned int nonceCount = 1);
-  std::shared_ptr<BasicHTTPClient> HTTPClient(const std::string& method, const std::string& username, const std::string& password, const std::string& URL, const std::string& content_type = "text/html", const std::initializer_list<std::pair<std::string, std::string>>& headerFields = {}, size_t contentLength = 0, const std::string& cnonce = "abcdefg", unsigned int nonceCount = 1);
+  std::shared_ptr<BasicHTTPClient> HTTPClient(const std::string& username, const std::string& password, const std::string& method, const std::string& URL, const std::string& content_type = "text/html", const std::initializer_list<std::pair<std::string, std::string>>& headerFields = {}, const std::string& cnonce = "abcdefg", unsigned int nonceCount = 1);
+  std::shared_ptr<BasicHTTPClient> HTTPClient(const std::string& username, const std::string& password, const std::string& method, const std::string& URL, const std::string& content_type = "text/html", const std::initializer_list<std::pair<std::string, std::string>>& headerFields = {}, size_t contentLength = 0, const std::string& cnonce = "abcdefg", unsigned int nonceCount = 1);
 }
 #endif
