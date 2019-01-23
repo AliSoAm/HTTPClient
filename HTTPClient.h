@@ -1,6 +1,7 @@
 #ifndef HTTPCLIENT_H
 #define HTTPCLIENT_H
 #include <map>
+#include <tuple>
 #include <vector>
 #include <memory>
 #include <string>
@@ -40,7 +41,6 @@ namespace HTTPClient{
     size_t get(char* buffer, size_t length);
   private:
     std::shared_ptr<TCPClient>          TCP;
-    char                                remainingBuffer[150];
     size_t                              remainingBufferLen;
     size_t                              remainingChunkLen;
     size_t                              contentReceived;
@@ -52,6 +52,9 @@ namespace HTTPClient{
     HeaderFields                        header_;
     bool                                chunkedSend_;
     std::string                         URI_;
+    size_t                              sendBufferSize;
+    size_t                              receiveBufferSize;
+    std::vector<char>                   remainingBuffer;
 
     std::tuple<bool, std::string, std::uint16_t, std::string> splitAddressPortURI(const std::string& URL);
     void sendHeader(const std::string& method, const std::string& URI, const std::string& host, const std::string& contentType, const std::vector<std::pair<std::string, std::string>>& headerFields);
@@ -74,7 +77,9 @@ namespace HTTPClient{
   std::tuple<int, std::string> HTTPPost(const std::string& URL, const std::string& content_type = "text/html", const std::initializer_list<std::pair<std::string, std::string>>& headerFields = {}, const std::string& body = "");
 
   // TODO add function without content length
-  std::shared_ptr<BasicHTTPClient> HTTPClient(const std::string& username, const std::string& password, const std::string& method, const std::string& URL, const std::string& content_type = "text/html", const std::initializer_list<std::pair<std::string, std::string>>& headerFields = {}, const std::string& cnonce = "abcdefg", unsigned int nonceCount = 1);
-  std::shared_ptr<BasicHTTPClient> HTTPClient(const std::string& username, const std::string& password, const std::string& method, const std::string& URL, const std::string& content_type = "text/html", const std::initializer_list<std::pair<std::string, std::string>>& headerFields = {}, size_t contentLength = 0, const std::string& cnonce = "abcdefg", unsigned int nonceCount = 1);
+  std::shared_ptr<BasicHTTPClient> HTTPClient(const std::string& username, const std::string& password, const std::string& method, const std::string& URL, const std::string& content_type, const std::initializer_list<std::pair<std::string, std::string>>& headerFields, const std::string& cnonce = "abcdefg", unsigned int nonceCount = 1);
+  std::shared_ptr<BasicHTTPClient> HTTPClient(const std::string& username, const std::string& password, const std::string& method, const std::string& URL, const std::string& content_type, const std::initializer_list<std::pair<std::string, std::string>>& headerFields, size_t contentLength, const std::string& cnonce = "abcdefg", unsigned int nonceCount = 1);
+  std::shared_ptr<BasicHTTPClient> HTTPClient(const std::string& method, const std::string& URL, const std::string& content_type, const std::initializer_list<std::pair<std::string, std::string>>& headerFields);
+  std::shared_ptr<BasicHTTPClient> HTTPClient(const std::string& method, const std::string& URL, const std::string& content_type, const std::initializer_list<std::pair<std::string, std::string>>& headerFields, size_t contentLength);
 }
 #endif

@@ -1,5 +1,4 @@
 #include "HTTPClient.h"
-#include <tuple>
 #include <cstring>
 #include <array>
 #include <algorithm>
@@ -39,8 +38,9 @@ namespace HTTPClient
 
   BasicHTTPClient::BasicHTTPClient(const string& method, const string& URL, const string& contentType
     , const vector<pair<string, string>>& headerFields)
-    : remainingChunkLen(0), contentReceived(0), recvComplete(false), chunkedTransfer_(false)
-    , contentLength_(0), responseHeaderReceived(false), chunkedSend_(true)
+    : remainingChunkLen(0), contentReceived(0), recvComplete(false), chunkedTransfer_(false), contentLength_(0)
+    , responseHeaderReceived(false), chunkedSend_(true), sendBufferSize(1024), receiveBufferSize(1024)
+    , remainingBuffer(receiveBufferSize)
   {
     string host;
     uint16_t port;
@@ -53,7 +53,8 @@ namespace HTTPClient
   BasicHTTPClient::BasicHTTPClient(const string& method, const string& URL, const string& contentType
     , const vector<pair<string, string>>& headerFields, size_t contentLength)
     : remainingChunkLen(0), contentReceived(0), recvComplete(false), chunkedTransfer_(false)
-    , contentLength_(0), responseHeaderReceived(false), chunkedSend_(false)
+    , contentLength_(0), responseHeaderReceived(false), chunkedSend_(false), sendBufferSize(1024)
+    , receiveBufferSize(1024), remainingBuffer(receiveBufferSize)
   {
     string host;
     uint16_t port;
@@ -104,7 +105,7 @@ namespace HTTPClient
     return make_tuple(HTTPS_, host, port, URN);
   }
 
-  std::string BasicHTTPClient::URI()
+  string BasicHTTPClient::URI()
   {
     return URI_;
   }
@@ -141,27 +142,27 @@ namespace HTTPClient
 
   void BasicHTTPClient::chunkedSend(const char* buffer, size_t length)
   {
-    char sendBuffer[100];
+    vector<char> sendBuffer(sendBufferSize);
     size_t remainedLength = length;
     while (remainedLength > 0)
     {
-      if (remainedLength > (100 - 7))
+      if (remainedLength > (sendBufferSize - 7))
       {
-        sprintf(sendBuffer, "%03x\r\n", 100 - 7);
-        memcpy(sendBuffer + 5, buffer, 100 - 7);
-        sendBuffer[100 - 2] = '\r';
-        sendBuffer[100 - 1] = '\n';
-        TCP->Send(sendBuffer, 100);
-        buffer += 100 - 7;
-        remainedLength -= 100 - 7;
+        sprintf(sendBuffer.data(), "%03x\r\n", sendBufferSize - 7);
+        memcpy(sendBuffer.data() + 5, buffer, sendBufferSize - 7);
+        sendBuffer[sendBufferSize - 2] = '\r';
+        sendBuffer[sendBufferSize - 1] = '\n';
+        TCP->Send(sendBuffer.data(), sendBufferSize);
+        buffer += sendBufferSize - 7;
+        remainedLength -= sendBufferSize - 7;
       }
       else
       {
-        sprintf(sendBuffer, "%03x\r\n", remainedLength);
-        memcpy(sendBuffer + 5, buffer, remainedLength);
+        sprintf(sendBuffer.data(), "%03x\r\n", remainedLength);
+        memcpy(sendBuffer.data() + 5, buffer, remainedLength);
         sendBuffer[remainedLength + 5] = '\r';
         sendBuffer[remainedLength + 6] = '\n';
-        TCP->Send(sendBuffer, remainedLength + 7);
+        TCP->Send(sendBuffer.data(), remainedLength + 7);
         buffer += remainedLength;
         remainedLength = 0;
       }
@@ -204,22 +205,14 @@ namespace HTTPClient
       if (remainingChunkLen > 0)
       {
         if (remainingBufferLen > 0)
-        {
           recvedLen = recvRemainingBuffer(buffer, length, recvedLen);
-        }
         else
-        {
           recvedLen = recvRemainingChunk(buffer, length, recvedLen);
-//          if (remainingChunkLen > 0 && length != recvedLen)
-//            throw HTTPClientException();
-        }
         if (remainingChunkLen == 0)
           completeCurrentChunk();
       }
       else
-      {
         prepareForNextChunk();
-      }
     }
     return recvedLen;
   }
@@ -230,8 +223,8 @@ namespace HTTPClient
     if (remainingBufferLen > 0)///XXX
     {
       size_t readLen = min(remainingBufferLen, length);
-      memcpy(buffer, remainingBuffer, readLen);
-      memmove(remainingBuffer, remainingBuffer + readLen, remainingBufferLen - readLen);
+      memcpy(buffer, remainingBuffer.data(), readLen);
+      memmove(remainingBuffer.data(), remainingBuffer.data() + readLen, remainingBufferLen - readLen);
       recvedLen = readLen;
       remainingBufferLen -= recvedLen;
       contentReceived += recvedLen;
@@ -254,11 +247,11 @@ namespace HTTPClient
   {
     size_t readyLen = min(remainingChunkLen, remainingBufferLen);
     size_t readLen = min(length - recvedLen, readyLen);
-    memcpy(buffer + recvedLen, remainingBuffer, readLen);
+    memcpy(buffer + recvedLen, remainingBuffer.data(), readLen);
     recvedLen += readLen;
     remainingChunkLen -= readLen;
     remainingBufferLen -= readLen;
-    memmove(remainingBuffer, remainingBuffer + readLen, remainingBufferLen);
+    memmove(remainingBuffer.data(), remainingBuffer.data() + readLen, remainingBufferLen); // TODO REMOVE buffer move for efficiency
     remainingBuffer[remainingBufferLen] = 0;
     return recvedLen;
   }
@@ -268,18 +261,18 @@ namespace HTTPClient
     int recvLen = 0;
     size_t readLen = min((length - recvedLen), remainingChunkLen);
     recvLen = TCP->Recv(buffer + recvedLen, readLen);
-//    if (recvLen != readLen)
-//      throw HTTPClientException("Bad HTTP chunk3");
+    if (recvLen <= 0)
+      throw HTTPClientException("Bad HTTP chunk3");
     remainingChunkLen -= recvLen;
     recvedLen += recvLen;
     return recvedLen;
   }
 
-  void BasicHTTPClient::completeCurrentChunk()
+  void BasicHTTPClient::completeCurrentChunk() // TODO read 1 or 2 byte is not efficient 
   {
     if (remainingBufferLen >= 2)
     {
-      memmove(remainingBuffer, remainingBuffer + 2, remainingBufferLen - 2);
+      memmove(remainingBuffer.data(), remainingBuffer.data() + 2, remainingBufferLen - 2);
       remainingBufferLen -= 2;
       remainingBuffer[remainingBufferLen] = 0;
     }
@@ -303,14 +296,14 @@ namespace HTTPClient
   {
     int recvLen = remainingBufferLen;
     size_t startChunk = 0;
-    string chunk(remainingBuffer);
+    string chunk(remainingBuffer.data());
     if (chunk.find("\r\n") == string::npos)
     {
-      recvLen = TCP->Recv(remainingBuffer, 99);
+      recvLen = TCP->Recv(remainingBuffer.data(), receiveBufferSize - 1);
       if (recvLen == 0)
         throw HTTPClientException("Bad HTTP chunk1");
       remainingBuffer[recvLen] = 0;
-      chunk += remainingBuffer;
+      chunk += remainingBuffer.data();
       startChunk = chunk.find("\r\n") + 2 - remainingBufferLen;
     }
     else
@@ -326,7 +319,7 @@ namespace HTTPClient
       return;
     }
     remainingBufferLen = recvLen - startChunk;
-    memmove(remainingBuffer, remainingBuffer + startChunk, remainingBufferLen);
+    memmove(remainingBuffer.data(), remainingBuffer.data() + startChunk, remainingBufferLen);
     remainingBuffer[remainingBufferLen] = 0;
     return;
   }
@@ -344,26 +337,26 @@ namespace HTTPClient
 
   void BasicHTTPClient::ParseResponse()
   {
-    char buffer[100];
+    vector<char> receiveBuffer(receiveBufferSize);
     string packet, header, body;
     size_t headerEnd = 0;
     size_t bufferEnd = 0;
     int recvLen = 0;
     do
     {
-      recvLen = TCP->Recv(buffer, 99);
+      recvLen = TCP->Recv(receiveBuffer.data(), receiveBufferSize - 1);
       if (recvLen <= 0)
       {
         //XXX
       }
-      buffer[recvLen] = '\0';
+      receiveBuffer[recvLen] = '\0';
       bufferEnd += recvLen;
-      packet += buffer;
+      packet += receiveBuffer.data();
       headerEnd = packet.find("\r\n\r\n");
     } while (headerEnd == string::npos);
     size_t payloadStart = recvLen - (bufferEnd - (headerEnd + 4));
     remainingBufferLen = bufferEnd - (headerEnd + 4);
-    memcpy(remainingBuffer, buffer + payloadStart, remainingBufferLen);
+    memcpy(remainingBuffer.data(), receiveBuffer.data() + payloadStart, remainingBufferLen);
     remainingBuffer[remainingBufferLen] = 0;
     header = packet.substr(0, headerEnd);
     int code;
@@ -454,7 +447,7 @@ namespace HTTPClient
     {
       size_t posBegin = authenticateFields.find(feild);
       string authenticateField = "";
-      if (posBegin != std::string::npos)
+      if (posBegin != string::npos)
       {
         for (; authenticateFields.at(posBegin) != '='; posBegin++);
         for (; authenticateFields.at(posBegin) != '\"'; posBegin++);
@@ -507,9 +500,6 @@ namespace HTTPClient
   {
     BasicHTTPClient client(method, URL, content_type, headerFields, contentLength);
     client.finishRequest();
-    array<char, 50> buffer;
-    while (!client.isRecvCompleted())
-      int recvLen = client.get(buffer.data(), 50);
     if (client.responseCode() == 401 && client.header().count("www-authenticate") > 0)
     {
       vector<pair<string, string>> newHeaderFields(headerFields);
@@ -530,5 +520,43 @@ namespace HTTPClient
         throw HTTPClientException("Undefined authenticate method");
     }
     return make_shared<BasicHTTPClient>(method, URL, content_type, headerFields);
+  }
+
+  shared_ptr<BasicHTTPClient> HTTPClient(const string& username, const string& password
+    , const string& method, const string& URL, const string& content_type, const initializer_list<pair<string, string>>& headerFields
+    , const string& cnonce, unsigned int nonceCount)
+  {
+    BasicHTTPClient client(method, URL, content_type, headerFields, 0);
+    client.finishRequest();
+    if (client.responseCode() == 401 && client.header().count("www-authenticate") > 0)
+    {
+      vector<pair<string, string>> newHeaderFields(headerFields);
+      string authenticate = client.header().at("www-authenticate");
+      if (authenticate.compare(0, 5, "Basic") == 0)
+      {
+        newHeaderFields.push_back(make_pair("Authorization", "Basic " + md5(username + ":" + password)));
+        return make_shared<BasicHTTPClient>(method, URL, content_type, newHeaderFields);
+      }
+      else if (authenticate.compare(0, 6, "Digest") == 0)
+      {
+        auto authenticateFields = parseAuthenticateFields(authenticate);
+        string authorizationString = makeAuthenticateResponse(authenticateFields, username, password, method, cnonce, nonceCount, client.URI());
+        newHeaderFields.push_back(make_pair("Authorization", "Digest " + authorizationString));
+        return make_shared<BasicHTTPClient>(method, URL, content_type, newHeaderFields);
+      }
+      else
+        throw HTTPClientException("Undefined authenticate method");
+    }
+    return make_shared<BasicHTTPClient>(method, URL, content_type, headerFields);
+  }
+
+  shared_ptr<BasicHTTPClient> HTTPClient(const string& method, const string& URL, const string& content_type, const initializer_list<pair<string, string>>& headerFields)
+  {
+    return make_shared<BasicHTTPClient>(method, URL, content_type, headerFields);
+  }
+
+  shared_ptr<BasicHTTPClient> HTTPClient(const string& method, const string& URL, const string& content_type, const initializer_list<pair<string, string>>& headerFields, size_t contentLength)
+  {
+    return make_shared<BasicHTTPClient>(method, URL, content_type, headerFields, contentLength);
   }
 }
